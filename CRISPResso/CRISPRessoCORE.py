@@ -273,7 +273,7 @@ def process_df_chunk(df_needle_alignment_chunk):
 
      MODIFIED_FRAMESHIFT=0
      MODIFIED_NON_FRAMESHIFT=0
-     NON_MODIFIED_NON_FRAMESHIFT=0
+     NON_INDELS_NON_FRAMESHIFT=0
      SPLICING_SITES_MODIFIED=0
 
      #INITIALIZATIONS
@@ -308,11 +308,27 @@ def process_df_chunk(df_needle_alignment_chunk):
      re_find_indels=re.compile("(-*-)")
      re_find_substitutions=re.compile("(\.*\.)")
 
+     filename=os.path.join(os.path.abspath(args.output_folder),args.name,'hdr_reads.txt')
+     fh_hdr = open(filename,"w")
+     filename=os.path.join(os.path.abspath(args.output_folder),args.name,'indel_reads.txt')
+     fh_indel = open(filename,"w")
+     filename=os.path.join(os.path.abspath(args.output_folder),args.name,'ref_reads.txt')
+     fh_ref = open(filename,"w")
+     filename=os.path.join(os.path.abspath(args.output_folder),args.name,'mixed_reads.txt')
+     fh_mixed = open(filename,"w")
+     filename=os.path.join(os.path.abspath(args.output_folder),args.name,'cutsub_reads.txt')
+     fh_cutsub = open(filename,"w")
+
+#file = open(“testfile.txt”, “w”)
+#file.write(“To add more lines.”)
+# file.close()
+
 
      for idx_row,row in df_needle_alignment_chunk.iterrows():
 
                  #GET THE MUTATIONS POSITIONS
                  if row.UNMODIFIED:
+                     fh_ref.write("%s\n%s\n%s\n\n" % (row.ref_seq,row.align_str,row.align_seq))
                      continue
 
                  if PERFORM_FRAMESHIFT_ANALYSIS:
@@ -321,15 +337,23 @@ def process_df_chunk(df_needle_alignment_chunk):
                     current_read_spliced_modified=False
 
                  #quantify substitution
+		 #info("START=====================================================")
                  substitution_positions=[]
                  if not args.ignore_substitutions:
                      for p in re_find_substitutions.finditer(row.align_str):
                          st,en=p.span()
-                         substitution_positions.append(row.ref_positions[st:en])
+			 #print "st %d en %d" % (st,en)
+                         if args.expected_hdr_amplicon_seq:
+			     #print "DONOR: %s READ %s" % (row.aln_donor_seq[st:en],row.align_seq[st:en])
+			     #if row.aln_donor_seq[st:en] == row.align_seq[st:en]:
+                             substitution_positions.append(row.ref_positions[st:en])
+			 else: 
+                             substitution_positions.append(row.ref_positions[st:en])
 
                      if substitution_positions:
                          substitution_positions=list(np.hstack(substitution_positions))
 
+		 #info("END=====================================================")
                  #quantify deletion
                  deletion_positions=[]
                  deletion_positions_flat=[]
@@ -360,30 +384,73 @@ def process_df_chunk(df_needle_alignment_chunk):
 
                      if insertion_positions:
                          insertion_positions_flat=np.hstack(insertion_positions)
+			 #print "%s adding to insertions: %s include: %s" % (insertion_sizes,insertion_positions_flat,include_idxs)
+
 
 
                  ########CLASSIFY READ
+	         #info('Diffs ref vs donor: %s  ' % ref_donor_diffs)
                  #WE HAVE THE DONOR SEQUENCE
                  if args.expected_hdr_amplicon_seq:
 
+		    ref_donor_diffs=[i for i in xrange(len(args.expected_hdr_amplicon_seq)) if args.expected_hdr_amplicon_seq[i] != args.amplicon_seq[i]]
+		    hdr = False
                     #HDR
-                    if (row.score_diff<0) & (row.score_repaired>=args.hdr_perfect_alignment_threshold):
-                        df_needle_alignment_chunk.ix[idx_row,'HDR']=True
+		    # WAS testing for HDR as read has higher percent identity with donor than with reference
+		    # NOW testing if there is editing at the exact location. 
+                    #if (row.score_diff<0) & (row.score_repaired>=args.hdr_perfect_alignment_threshold):
+		    j = 0
+                    hdr_in_cutsite_window = False
+		    for i in range(len(ref_donor_diffs)):
+			#print "chars: %s %s %d" % (args.expected_hdr_amplicon_seq[ref_donor_diffs[i]],row.align_seq[ref_donor_diffs[i]],ref_donor_diffs[i])
+                        if ref_donor_diffs[i] in substitution_positions and args.expected_hdr_amplicon_seq[ref_donor_diffs[i]] == row.align_seq[ref_donor_diffs[i]]:
+                            df_needle_alignment_chunk.ix[idx_row,'HDR']=True
+			    hdr = True
+			    hdr_vector[i]+=1
+			    j = i
+                            if ref_donor_diffs[i] in include_idxs:
+                                hdr_in_cutsite_window = True
+				#substitution_positions.remove(ref_donor_diffs[i])
+			    #info('HDR %s %s' % (i,substitution_positions))
 
-                    #MIXED
-                    elif (row.score_diff<0) & (row.score_repaired<args.hdr_perfect_alignment_threshold):
-                        df_needle_alignment_chunk.ix[idx_row,'MIXED']=True
+                    if set(ref_donor_diffs) <= set(substitution_positions):
+			hdr_vector[j+1]+=1
+			#info('ref_donor_diffs subset of subst_pos %s %s\n' % (ref_donor_diffs,substitution_positions))
 
-                    else:
-                        #NHEJ
+
+                    if not hdr:
+                        #NHEJ and not HDR
+                        if include_idxs.intersection(substitution_positions):
+			    fh_cutsub.write("%s\n%s\n%s\n\n" % (row.ref_seq,row.align_str,row.align_seq))
+                             
+		
                         if include_idxs.intersection(substitution_positions) \
                         or include_idxs.intersection(insertion_positions_flat) or \
                         include_idxs.intersection(deletion_positions_flat):
                             df_needle_alignment_chunk.ix[idx_row,'NHEJ']=True
+			    fh_indel.write("%s\n%s\n%s\n\n" % (row.ref_seq,row.align_str,row.align_seq))
+			    #print "INDEL: %s adding to insertions: %s include: %s" % (insertion_sizes,insertion_positions_flat,include_idxs)
 
-                        #UNMODIFIED
-                        else:
+                        #UNMODIFIED NOT HDR and NOT NHEJ
+                        else: 
                             df_needle_alignment_chunk.ix[idx_row,'UNMODIFIED']=True
+			    fh_ref.write("%s\n%s\n%s\n\n" % (row.ref_seq,row.align_str,row.align_seq))
+			    #print "REF: %s adding to insertions: %s include: %s" % (insertion_sizes,insertion_positions_flat,include_idxs)
+                    if hdr:
+                        #NHEJ
+                        if include_idxs.intersection(substitution_positions):
+			    fh_cutsub.write("%s\n%s\n%s\n\n" % (row.ref_seq,row.align_str,row.align_seq))
+                        if include_idxs.intersection(substitution_positions) \
+                        or include_idxs.intersection(insertion_positions_flat) or \
+                        include_idxs.intersection(deletion_positions_flat):
+                            df_needle_alignment_chunk.ix[idx_row,'NHEJ']=True
+			    fh_indel.write("%s\n%s\n%s\n\n" % (row.ref_seq,row.align_str,row.align_seq))
+                            df_needle_alignment_chunk.ix[idx_row,'MIXED']=True
+			    fh_mixed.write("%s\n%s\n%s\n\n" % (row.ref_seq,row.align_str,row.align_seq))
+                        else:
+			# HDR
+			    fh_hdr.write("%s\n%s\n%s\n\n" % (row.ref_seq,row.align_str,row.align_seq))
+	
 
                  #NO DONOR SEQUENCE PROVIDED
                  else:
@@ -392,10 +459,12 @@ def process_df_chunk(df_needle_alignment_chunk):
                         or include_idxs.intersection(insertion_positions_flat) or \
                         include_idxs.intersection(deletion_positions_flat):
                         df_needle_alignment_chunk.ix[idx_row,'NHEJ']=True
+			fh_indel.write("%s\n%s\n%s\n\n" % (row.ref_seq,row.align_str,row.align_seq))
 
                     #UNMODIFIED
                     else:
                         df_needle_alignment_chunk.ix[idx_row,'UNMODIFIED']=True
+			fh_ref.write("%s\n%s\n%s\n\n" % (row.ref_seq,row.align_str,row.align_seq))
 
 
                  ###CREATE AVERAGE SIGNALS, HERE WE SHOW EVERYTHING...
@@ -516,11 +585,16 @@ def process_df_chunk(df_needle_alignment_chunk):
 
                         #the indels and subtitutions are outside the exon/s  so we don't care!
                         else:
-                            NON_MODIFIED_NON_FRAMESHIFT+=1
+                            NON_INDELS_NON_FRAMESHIFT+=1
                             effect_vector_insertion_noncoding[insertion_positions_flat]+=1
                             effect_vector_deletion_noncoding[deletion_positions_flat]+=1
                             effect_vector_mutation_noncoding[substitution_positions]+=1
 
+     fh_hdr.close()
+     fh_ref.close()
+     fh_indel.close()
+     fh_mixed.close()
+     fh_cutsub.close()
      hist_inframe=dict(hist_inframe)
      hist_frameshift=dict(hist_frameshift)
 
@@ -528,7 +602,7 @@ def process_df_chunk(df_needle_alignment_chunk):
      effect_vector_mutation,effect_vector_any,effect_vector_insertion_mixed,effect_vector_deletion_mixed,\
      effect_vector_mutation_mixed,effect_vector_insertion_hdr,effect_vector_deletion_hdr,effect_vector_mutation_hdr,\
      effect_vector_insertion_noncoding,effect_vector_deletion_noncoding,effect_vector_mutation_noncoding,hist_inframe,\
-     hist_frameshift,avg_vector_del_all,avg_vector_ins_all,MODIFIED_FRAMESHIFT,MODIFIED_NON_FRAMESHIFT,NON_MODIFIED_NON_FRAMESHIFT,\
+     hist_frameshift,avg_vector_del_all,avg_vector_ins_all,MODIFIED_FRAMESHIFT,MODIFIED_NON_FRAMESHIFT,NON_INDELS_NON_FRAMESHIFT,\
      SPLICING_SITES_MODIFIED
 
 
@@ -687,8 +761,6 @@ def plot_alleles_table(reference_seq,cut_point,df_alleles,sgRNA_name,OUTPUT_DIRE
 
     # make a color map of fixed colors
     alpha=0.5
-
-
     get_color=lambda x,y,z: (x/255.0,y/255.0,z/255.0,alpha)
     A_color=get_color(127,201,127)
     T_color=get_color(190,174,212)
@@ -705,9 +777,7 @@ def plot_alleles_table(reference_seq,cut_point,df_alleles,sgRNA_name,OUTPUT_DIRE
     annot=[]
     y_labels=[]
     lines=defaultdict(list)
-
     re_find_indels=re.compile("(-*-)")
-
 
     per_element_annot_kws=[]
     idx_row=0
@@ -716,13 +786,10 @@ def plot_alleles_table(reference_seq,cut_point,df_alleles,sgRNA_name,OUTPUT_DIRE
         annot.append(list(idx))
         y_labels.append('%.2f%% (%d reads)' % (row['%Reads'],row['#Reads']))
 
-
         for p in re_find_indels.finditer(row['Reference_Sequence']):
             lines[idx_row].append((p.start(),p.end()))
 
         idx_row+=1
-
-
         idxs_sub= [i_sub for i_sub in range(len(idx)) if \
                    (row['Reference_Sequence'][i_sub]!=idx[i_sub]) and \
                    (row['Reference_Sequence'][i_sub]!='-') and\
@@ -733,11 +800,9 @@ def plot_alleles_table(reference_seq,cut_point,df_alleles,sgRNA_name,OUTPUT_DIRE
 
     ref_seq_around_cut=reference_seq[cut_point-offset_around_cut_to_plot+1:cut_point+offset_around_cut_to_plot+1]
 
-
     per_element_annot_kws=np.vstack(per_element_annot_kws[::-1])
     ref_seq_hm=np.expand_dims(seq_to_numbers(ref_seq_around_cut),1).T
     ref_seq_annot_hm=np.expand_dims(list(ref_seq_around_cut),1).T
-
     NEW_SEABORN=np.sum(np.array(map(int,sns.__version__.split('.')))*(100,10,1))>= 80
 
     if NEW_SEABORN:
@@ -798,9 +863,9 @@ def plot_alleles_table(reference_seq,cut_point,df_alleles,sgRNA_name,OUTPUT_DIRE
 
     _jp=lambda filename: os.path.join(OUTPUT_DIRECTORY,filename)
 
-    plt.savefig(_jp('9.Alleles_around_cut_site_for_%s.pdf' % sgRNA_name),bbox_inches='tight')
+    plt.savefig(_jp('9.Alleles_around_cut_site_for_%s.pdf' % args.name),bbox_inches='tight')
     if args.save_also_png:
-        plt.savefig(_jp('9.Alleles_around_cut_site_for_%s.png' % sgRNA_name),bbox_inches='tight',pad=1)
+        plt.savefig(_jp('9.Alleles_around_cut_site_for_%s.png' % args.name),bbox_inches='tight',pad=1)
 
 
 def main():
@@ -827,7 +892,9 @@ def main():
              global len_amplicon
              global exon_positions
              global splicing_positions
-
+	     global hdr_vector 
+	     global ref_donor_diffs
+	
              parser = argparse.ArgumentParser(description='CRISPResso Parameters',formatter_class=argparse.ArgumentDefaultsHelpFormatter)
              parser.add_argument('-r1','--fastq_r1', type=str,  help='First fastq file', required=True,default='Fastq filename' )
              parser.add_argument('-r2','--fastq_r2', type=str,  help='Second fastq file for paired end reads',default='')
@@ -842,11 +909,12 @@ def main():
              parser.add_argument('-s','--min_single_bp_quality', type=int, help='Minimum single bp score (phred33) to keep a read', default=0)
              parser.add_argument('--min_identity_score', type=float, help='Minimum identity score for the alignment', default=60.0)
              parser.add_argument('-n','--name',  help='Output name', default='')
+             parser.add_argument('-k','--skip_aln',  help='Skip alignment step', default='')
              parser.add_argument('-o','--output_folder',  help='', default='')
              parser.add_argument('--split_paired_end',help='Splits a single fastq file contating paired end reads in two files before running CRISPResso',action='store_true')
              parser.add_argument('--trim_sequences',help='Enable the trimming of Illumina adapters with Trimmomatic',action='store_true')
              parser.add_argument('--trimmomatic_options_string', type=str, help='Override options for Trimmomatic',default=' ILLUMINACLIP:%s:0:90:10:0:true MINLEN:40' % get_data('NexteraPE-PE.fa'))
-             parser.add_argument('--min_paired_end_reads_overlap',  type=int, help='Minimum required overlap length between two reads to provide a confident overlap. ', default=4)
+             parser.add_argument('--min_paired_end_reads_overlap',  type=int, help='Minimum required overlap length between two reads to provide a confident overlap. ', default=75)
              parser.add_argument('--hide_mutations_outside_window_NHEJ',help='This parameter allows to visualize only the mutations overlapping the cleavage site and used to classify a read as NHEJ. This parameter has no effect on the quanitification of the NHEJ. It  may be helpful to mask a pre-existing and known mutations or sequencing errors outside the window used for quantification of NHEJ events.',action='store_true')
              parser.add_argument('-w','--window_around_sgrna', type=int, help='Window(s) in bp around the cleavage position (half on on each side) as determined by the provide guide RNA sequence to quantify the indels. Any indels outside this window are excluded. A value of 0 disables this filter.', default=1)
              parser.add_argument('--cleavage_offset', type=int, help="Cleavage offset to use within respect to the 3' end of the provided sgRNA sequence. Remember that the sgRNA sequence must be entered without the PAM. The default is -3 and is suitable for the SpCas9 system. For alternate nucleases, other cleavage offsets may be appropriate, for example, if using Cpf1 this parameter would be set to 1.", default=-3)
@@ -873,6 +941,7 @@ def main():
              if args.fastq_r2:
                      check_file(args.fastq_r2)
 
+
              #normalize name and remove not allowed characters
              if args.name:
                  clean_name=slugify(args.name)
@@ -889,6 +958,7 @@ def main():
                  raise NTException('The amplicon sequence contains wrong characters:%s' % ' '.join(wrong_nt))
 
              len_amplicon=len(args.amplicon_seq)
+	     hdr_vector=np.zeros(10)
 
              if args.guide_seq:
                      cut_points=[]
@@ -896,16 +966,12 @@ def main():
                      offset_plots=[]
                      sgRNA_sequences=[]
 
-
                      args.guide_seq=args.guide_seq.strip().upper()
-
                      for current_guide_seq in args.guide_seq.split(','):
-
                          if current_guide_seq in args.amplicon_seq:
                             offset_plots.append(1)
                          else:
                             offset_plots.append(0)
-
 
                          wrong_nt=find_wrong_nt(current_guide_seq)
                          if wrong_nt:
@@ -934,6 +1000,7 @@ def main():
 
              if args.expected_hdr_amplicon_seq:
                      args.expected_hdr_amplicon_seq=args.expected_hdr_amplicon_seq.strip().upper()
+	             ref_donor_diffs=[i for i in xrange(len(args.expected_hdr_amplicon_seq)) if args.expected_hdr_amplicon_seq[i] != args.amplicon_seq[i]]
 
                      if args.expected_hdr_amplicon_seq == args.amplicon_seq:
                          raise AmpliconEqualDonorException('The amplicon sequence expected after an HDR and the reference amplicon cannot be the same! \n\nPlease check your input!')
@@ -945,9 +1012,13 @@ def main():
                      #if len(args.expected_hdr_amplicon_seq)!=len(args.amplicon_seq):
                      aligned_ref,aligned_exp=pairwise2.align.globalxx (args.amplicon_seq,args.expected_hdr_amplicon_seq)[0][:2]
                      identity_ref_rep=sum([1.0 for a,b in zip(aligned_ref,aligned_exp)  if a==b  ])/len(aligned_ref)*100
+
+		
+
                      if identity_ref_rep < args.min_identity_score:
                          raise DonorSequenceException('The amplicon sequence expected after an HDR should be provided as the reference amplicon sequence with the relevant part of the donor sequence replaced, and not just as the donor sequence. \n\nPlease check your input!')
 
+	     exit;
              if args.donor_seq:
                      args.donor_seq=args.donor_seq.strip().upper()
                      wrong_nt=find_wrong_nt(args.donor_seq)
@@ -1009,7 +1080,7 @@ def main():
              MODIFIED_NON_FRAMESHIFT=0
 
              #we don't touch the exons at all, the read can be still modified tough..
-             NON_MODIFIED_NON_FRAMESHIFT=0
+             NON_INDELS_NON_FRAMESHIFT=0
 
              SPLICING_SITES_MODIFIED=0
 
@@ -1029,7 +1100,7 @@ def main():
                      database_id=args.name
 
 
-             OUTPUT_DIRECTORY='CRISPResso_on_%s' % database_id
+             OUTPUT_DIRECTORY='%s' % database_id
 
              if args.output_folder:
                      OUTPUT_DIRECTORY=os.path.join(os.path.abspath(args.output_folder),OUTPUT_DIRECTORY)
@@ -1085,110 +1156,111 @@ def main():
 
 
 
-             if args.fastq_r2=='': #single end reads
-
-                 #check if we need to trim
-                 if not args.trim_sequences:
-                     #create a symbolic link
-                     symlink_filename=_jp(os.path.basename(args.fastq_r1))
-                     force_symlink(os.path.abspath(args.fastq_r1),symlink_filename)
-                     output_forward_filename=symlink_filename
-                 else:
-                     output_forward_filename=_jp('reads.trimmed.fq.gz')
-                     #Trimming with trimmomatic
-                     cmd='java -jar %s SE -phred33 %s  %s %s >>%s 2>&1'\
-                     % (get_data('trimmomatic-0.33.jar'),args.fastq_r1,
-                        output_forward_filename,
-                        args.trimmomatic_options_string.replace('NexteraPE-PE.fa','TruSeq3-SE.fa'),
-                        log_filename)
-                     #print cmd
-                     TRIMMOMATIC_STATUS=sb.call(cmd,shell=True)
-
-                     if TRIMMOMATIC_STATUS:
-                             raise TrimmomaticException('TRIMMOMATIC failed to run, please check the log file.')
-
-
-                 processed_output_filename=output_forward_filename
-
-             else:#paired end reads case
-
-                 if not args.trim_sequences:
-                     output_forward_paired_filename=args.fastq_r1
-                     output_reverse_paired_filename=args.fastq_r2
-                 else:
-                     info('Trimming sequences with Trimmomatic...')
-                     output_forward_paired_filename=_jp('output_forward_paired.fq.gz')
-                     output_forward_unpaired_filename=_jp('output_forward_unpaired.fq.gz')
-                     output_reverse_paired_filename=_jp('output_reverse_paired.fq.gz')
-                     output_reverse_unpaired_filename=_jp('output_reverse_unpaired.fq.gz')
-
-                     #Trimming with trimmomatic
-                     cmd='java -jar %s PE -phred33 %s  %s %s  %s  %s  %s %s >>%s 2>&1'\
-                     % (get_data('trimmomatic-0.33.jar'),
-                             args.fastq_r1,args.fastq_r2,output_forward_paired_filename,
-                             output_forward_unpaired_filename,output_reverse_paired_filename,
-                             output_reverse_unpaired_filename,args.trimmomatic_options_string,log_filename)
-                     #print cmd
-                     TRIMMOMATIC_STATUS=sb.call(cmd,shell=True)
-                     if TRIMMOMATIC_STATUS:
-                             raise TrimmomaticException('TRIMMOMATIC failed to run, please check the log file.')
-
+             if not args.skip_aln:
+                 if args.fastq_r2=='': #single end reads
+    
+                     #check if we need to trim
+                     if not args.trim_sequences:
+                         #create a symbolic link
+                         symlink_filename=_jp(os.path.basename(args.fastq_r1))
+                         force_symlink(os.path.abspath(args.fastq_r1),symlink_filename)
+                         output_forward_filename=symlink_filename
+                     else:
+                         output_forward_filename=_jp('reads.trimmed.fq.gz')
+                         #Trimming with trimmomatic
+                         cmd='java -jar %s SE -phred33 %s  %s %s >>%s 2>&1'\
+                         % (get_data('trimmomatic-0.33.jar'),args.fastq_r1,
+                            output_forward_filename,
+                            args.trimmomatic_options_string.replace('NexteraPE-PE.fa','TruSeq3-SE.fa'),
+                            log_filename)
+                         #print cmd
+                         TRIMMOMATIC_STATUS=sb.call(cmd,shell=True)
+    
+                         if TRIMMOMATIC_STATUS:
+                                 raise TrimmomaticException('TRIMMOMATIC failed to run, please check the log file.')
+    
+    
+                     processed_output_filename=output_forward_filename
+    
+                 else:#paired end reads case
+    
+                     if not args.trim_sequences:
+                         output_forward_paired_filename=args.fastq_r1
+                         output_reverse_paired_filename=args.fastq_r2
+                     else:
+                         info('Trimming sequences with Trimmomatic...')
+                         output_forward_paired_filename=_jp('output_forward_paired.fq.gz')
+                         output_forward_unpaired_filename=_jp('output_forward_unpaired.fq.gz')
+                         output_reverse_paired_filename=_jp('output_reverse_paired.fq.gz')
+                         output_reverse_unpaired_filename=_jp('output_reverse_unpaired.fq.gz')
+    
+                         #Trimming with trimmomatic
+                         cmd='java -jar %s PE -phred33 %s  %s %s  %s  %s  %s %s >>%s 2>&1'\
+                         % (get_data('trimmomatic-0.33.jar'),
+                                 args.fastq_r1,args.fastq_r2,output_forward_paired_filename,
+                                 output_forward_unpaired_filename,output_reverse_paired_filename,
+                                 output_reverse_unpaired_filename,args.trimmomatic_options_string,log_filename)
+                         #print cmd
+                         TRIMMOMATIC_STATUS=sb.call(cmd,shell=True)
+                         if TRIMMOMATIC_STATUS:
+                                 raise TrimmomaticException('TRIMMOMATIC failed to run, please check the log file.')
+    
+                         info('Done!')
+    
+    
+                     info('Estimating average read length...')
+                     if get_n_reads_fastq(output_forward_paired_filename):
+                         avg_read_length=get_avg_read_lenght_fastq(output_forward_paired_filename)
+                         std_fragment_length=int(len_amplicon*0.1)
+                     else:
+                        raise NoReadsAfterQualityFiltering('No reads survived the average or single bp quality filtering.')
+    
+                     #Merging with Flash
+                     info('Merging paired sequences with Flash...')
+                     cmd='flash %s %s --allow-outies --min-overlap %d -f %d -r %d -s %d  -z -d %s >>%s 2>&1' %\
+                     (output_forward_paired_filename,
+                      output_reverse_paired_filename,
+                      args.min_paired_end_reads_overlap,
+                      len_amplicon,avg_read_length,
+                      std_fragment_length,
+                      OUTPUT_DIRECTORY,log_filename)
+    
+                     FLASH_STATUS=sb.call(cmd,shell=True)
+                     if FLASH_STATUS:
+                         raise FlashException('Flash failed to run, please check the log file.')
+    
                      info('Done!')
+    
+                     flash_hist_filename=_jp('out.hist')
+                     flash_histogram_filename=_jp('out.histogram')
+                     flash_not_combined_1_filename=_jp('out.notCombined_1.fastq.gz')
+                     flash_not_combined_2_filename=_jp('out.notCombined_2.fastq.gz')
+    
+                     processed_output_filename=_jp('out.extendedFrags.fastq.gz')
 
-
-                 info('Estimating average read length...')
-                 if get_n_reads_fastq(output_forward_paired_filename):
-                     avg_read_length=get_avg_read_lenght_fastq(output_forward_paired_filename)
-                     std_fragment_length=int(len_amplicon*0.1)
-                 else:
-                    raise NoReadsAfterQualityFiltering('No reads survived the average or single bp quality filtering.')
-
-                 #Merging with Flash
-                 info('Merging paired sequences with Flash...')
-                 cmd='flash %s %s --allow-outies --min-overlap %d -f %d -r %d -s %d  -z -d %s >>%s 2>&1' %\
-                 (output_forward_paired_filename,
-                  output_reverse_paired_filename,
-                  args.min_paired_end_reads_overlap,
-                  len_amplicon,avg_read_length,
-                  std_fragment_length,
-                  OUTPUT_DIRECTORY,log_filename)
-
-                 FLASH_STATUS=sb.call(cmd,shell=True)
-                 if FLASH_STATUS:
-                     raise FlashException('Flash failed to run, please check the log file.')
-
-                 info('Done!')
-
-                 flash_hist_filename=_jp('out.hist')
-                 flash_histogram_filename=_jp('out.histogram')
-                 flash_not_combined_1_filename=_jp('out.notCombined_1.fastq.gz')
-                 flash_not_combined_2_filename=_jp('out.notCombined_2.fastq.gz')
-
-                 processed_output_filename=_jp('out.extendedFrags.fastq.gz')
-
-             #count reads
-             N_READS_INPUT=get_n_reads_fastq(args.fastq_r1)
-             N_READS_AFTER_PREPROCESSING=get_n_reads_fastq(processed_output_filename)
-             if N_READS_AFTER_PREPROCESSING == 0:
-                 raise NoReadsAfterQualityFiltering('No reads in input or no reads survived the average or single bp quality filtering.')
+                 #count reads
+                 N_READS_INPUT=get_n_reads_fastq(args.fastq_r1)
+                 N_READS_AFTER_PREPROCESSING=get_n_reads_fastq(processed_output_filename)
+                 if N_READS_AFTER_PREPROCESSING == 0:
+                     raise NoReadsAfterQualityFiltering('No reads in input or no reads survived the average or single bp quality filtering.')
+                 #write statistics
+                 #with open(_jp('Mapping_statistics.txt'),'w+') as outfile:
+                 #    outfile.write('READS IN INPUTS:%d\nREADS AFTER PREPROCESSING:%d\nREADS ALIGNED:%d' % (N_READS_INPUT,N_READS_AFTER_PREPROCESSING,N_TOTAL))
 
              info('Preparing files for the alignment...')
              #parsing flash output and prepare the files for alignment
 
-
-             database_fasta_filename=_jp('%s_database.fa' % database_id)
              needle_output_filename=_jp('needle_output_%s.txt.gz' % database_id)
-
+             needle_output_repair_filename=_jp('needle_output_repair_%s.txt.gz' % database_id)
 
              #write .fa file only for amplicon the rest we pipe trough awk on the fly!
+	     if not args.skip_aln:
+                 database_fasta_filename=_jp('%s_database.fa' % database_id)
+                 with open(database_fasta_filename,'w+') as outfile:
+                         outfile.write('>%s\n%s\n' % (database_id,args.amplicon_seq))
 
-             with open(database_fasta_filename,'w+') as outfile:
-                     outfile.write('>%s\n%s\n' % (database_id,args.amplicon_seq))
-
-             if args.expected_hdr_amplicon_seq:
+                 if args.expected_hdr_amplicon_seq:
                      database_repair_fasta_filename=_jp('%s_database_repair.fa' % database_id)
-                     needle_output_repair_filename=_jp('needle_output_repair_%s.txt.gz' % database_id)
-
                      with open(database_repair_fasta_filename,'w+') as outfile:
                              outfile.write('>%s\n%s\n' % (database_id,args.expected_hdr_amplicon_seq))
              info('Done!')
@@ -1219,25 +1291,24 @@ def main():
 
                                          identity_seq=eval(line.strip().split(' ')[-1].replace('%','').replace(')','').replace('(',''))
 
+                                         for _ in range(7):
+                                             needle_infile.readline()
+
+                                         line=needle_infile.readline()
+                                         aln_ref_seq=line.split()[2]
+
+                                         aln_str=needle_infile.readline()[21:].rstrip('\n')
+                                         line=needle_infile.readline()
+                                         aln_query_seq=line.split()[2]
+                                         aln_query_len=line.split()[3]
                                          if just_score:
-                                                 needle_data.append([id_seq,identity_seq])
+                                                 needle_data.append([id_seq,identity_seq,aln_ref_seq])
                                          else:
-                                                 for _ in range(7):
-                                                         needle_infile.readline()
-
-                                                 line=needle_infile.readline()
-                                                 aln_ref_seq=line.split()[2]
-
-
-                                                 aln_str=needle_infile.readline()[21:].rstrip('\n')
-                                                 line=needle_infile.readline()
-                                                 aln_query_seq=line.split()[2]
-                                                 aln_query_len=line.split()[3]
                                                  needle_data.append([id_seq,identity_seq,aln_query_len,aln_ref_seq,aln_str,aln_query_seq])
 
                          if just_score:
                                  needle_infile.close()
-                                 return pd.DataFrame(needle_data,columns=['ID','score_'+name]).set_index('ID')
+                                 return pd.DataFrame(needle_data,columns=['ID','score_'+name,'aln_donor_seq']).set_index('ID')
                          else:
                                  needle_infile.close()
                                  return pd.DataFrame(needle_data,columns=['ID','score_'+name,'length','ref_seq','align_str','align_seq']).set_index('ID')
@@ -1245,40 +1316,38 @@ def main():
                          raise NeedleException('Failed to parse the output of needle!')
 
 
+             info('Aligning sequences with needle...')
 
-             info('Aligning sequences...')
-             #Alignment here
+             if not args.skip_aln:
+                 cmd=(('cat %s |'% processed_output_filename )+\
+                 (' gunzip |' if processed_output_filename.endswith('.gz') else ' '))+\
+                 r''' awk 'NR % 4 == 1 {print ">" $0} NR % 4 ==2 {print $0}' '''+\
+                 " | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
+                 %(database_fasta_filename,args.needle_options_string,log_filename,needle_output_filename)
 
-             cmd=(('cat %s |'% processed_output_filename )+\
-             (' gunzip |' if processed_output_filename.endswith('.gz') else ' '))+\
-             r''' awk 'NR % 4 == 1 {print ">" $0} NR % 4 ==2 {print $0}' '''+\
-             " | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
-             %(database_fasta_filename,args.needle_options_string,log_filename,needle_output_filename)
-
-             NEEDLE_OUTPUT=sb.call(cmd,shell=True)
-             if NEEDLE_OUTPUT:
+                 NEEDLE_OUTPUT=sb.call(cmd,shell=True)
+                 if NEEDLE_OUTPUT:
                      raise NeedleException('Needle failed to run, please check the log file.')
-
 
              #If we have a donor sequence we just compare the fq in the two cases and see which one alignes better
              if args.expected_hdr_amplicon_seq:
-
+                 if not args.skip_aln:
                      cmd_repair=(('cat %s |'% processed_output_filename )+\
                      (' gunzip |' if processed_output_filename.endswith('.gz') else ' '))+\
                      r''' awk 'NR % 4 == 1 {print ">" $0} NR % 4 ==2 {print $0}' '''+\
                      " | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
                      %(database_repair_fasta_filename,args.needle_options_string,log_filename,needle_output_repair_filename)
-                     NEEDLE_OUTPUT=sb.call(cmd_repair,shell=True)
 
+                     NEEDLE_OUTPUT=sb.call(cmd_repair,shell=True)
                      if NEEDLE_OUTPUT:
                              raise NeedleException('Needle failed to run, please check the log file.')
                      info('Done!')
-
+ 
+             # START HERE IF SKIPPING ALIGNMENT
              #merge the flow
              if args.expected_hdr_amplicon_seq:
                     df_database=parse_needle_output(needle_output_filename,'ref')
                     df_database_repair=parse_needle_output(needle_output_repair_filename,'repaired',just_score=True)
-
                     df_database_and_repair=df_database.join(df_database_repair)
 
                     del df_database
@@ -1300,9 +1369,7 @@ def main():
                         |(df_database_and_repair.score_repaired>args.min_identity_score)]
 
                     df_database_and_repair['score_diff']=df_database_and_repair.score_ref-df_database_and_repair.score_repaired
-
                     df_needle_alignment=df_database_and_repair
-
                     del df_database_and_repair
 
              else:
@@ -1315,15 +1382,15 @@ def main():
                     df_needle_alignment=df_needle_alignment.ix[df_needle_alignment.score_ref>args.min_identity_score]
 
 
-
              #check if the not aligned reads are in the reverse complement
              if sr_not_aligned.count():
                  #write fastq_not_aligned
                  fasta_not_aligned_filename=_jp('not_aligned_amplicon_forward.fa.gz')
 
-                 outfile=gzip.open(fasta_not_aligned_filename,'w+')
-                 for x in sr_not_aligned.iteritems():
-                    outfile.write('>%s\n%s\n' % (x[0],x[1]))
+                 if not args.skip_aln:
+                     outfile=gzip.open(fasta_not_aligned_filename,'w+')
+                     for x in sr_not_aligned.iteritems():
+                        outfile.write('>%s\n%s\n' % (x[0],x[1]))
 
                  #write reverse complement of ampl and expected amplicon
                  database_rc_fasta_filename=_jp('%s_database_rc.fa' % database_id)
@@ -1331,57 +1398,54 @@ def main():
 
                  info('Align sequences to reverse complement of the amplicon...')
 
-                 with open(database_rc_fasta_filename,'w+') as outfile:
+                 if not args.skip_aln:
+                     with open(database_rc_fasta_filename,'w+') as outfile:
                          outfile.write('>%s\n%s\n' % (database_id,reverse_complement(args.amplicon_seq)))
 
                  if args.expected_hdr_amplicon_seq:
                          database_repair_rc_fasta_filename=_jp('%s_database_repair_rc.fa' % database_id)
                          needle_output_repair_rc_filename=_jp('needle_output_repair_rc_%s.txt.gz' % database_id)
 
-                         with open(database_repair_rc_fasta_filename,'w+') as outfile:
+                         if not args.skip_aln:
+                             with open(database_repair_rc_fasta_filename,'w+') as outfile:
                                  outfile.write('>%s\n%s\n' % (database_id,reverse_complement(args.expected_hdr_amplicon_seq)))
                  info('Done!')
 
-
                  #Now we do the alignment
-                 cmd="zcat < %s | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
-                 %(fasta_not_aligned_filename,database_rc_fasta_filename,args.needle_options_string,log_filename,needle_output_rc_filename)
+                 if not args.skip_aln:
+                     cmd="zcat < %s | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
+                     %(fasta_not_aligned_filename,database_rc_fasta_filename,args.needle_options_string,log_filename,needle_output_rc_filename)
 
-                 NEEDLE_OUTPUT=sb.call(cmd,shell=True)
-                 if NEEDLE_OUTPUT:
+                     NEEDLE_OUTPUT=sb.call(cmd,shell=True)
+                     if NEEDLE_OUTPUT:
                          raise NeedleException('Needle failed to run, please check the log file.')
 
                  if args.expected_hdr_amplicon_seq:
-                    cmd="zcat < %s | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
-                    %(fasta_not_aligned_filename,database_repair_rc_fasta_filename,args.needle_options_string,log_filename,needle_output_repair_rc_filename)
+                    if not args.skip_aln:
+                        cmd="zcat < %s | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
+                        %(fasta_not_aligned_filename,database_repair_rc_fasta_filename,args.needle_options_string,log_filename,needle_output_repair_rc_filename)
 
-                    NEEDLE_OUTPUT=sb.call(cmd,shell=True)
-                    if NEEDLE_OUTPUT:
-                         raise NeedleException('Needle failed to run, please check the log file.')
-
+                        NEEDLE_OUTPUT=sb.call(cmd,shell=True)
+                        if NEEDLE_OUTPUT:
+                           raise NeedleException('Needle failed to run, please check the log file.')
 
                  #merge the flow rev
                  if args.expected_hdr_amplicon_seq:
                             df_database_rc=parse_needle_output(needle_output_rc_filename,'ref')
                             df_database_repair_rc=parse_needle_output(needle_output_repair_rc_filename,'repaired',just_score=True)
-
                             df_database_and_repair_rc=df_database_rc.join(df_database_repair_rc)
 
                             del df_database_rc
                             del df_database_repair_rc
 
                             #filter bad alignments also to rc
-
-
                             df_database_and_repair_rc=\
                             df_database_and_repair_rc.ix[\
                                 (df_database_and_repair_rc.score_ref>args.min_identity_score)\
                                 |(df_database_and_repair_rc.score_repaired>args.min_identity_score)]
 
                             df_database_and_repair_rc['score_diff']=df_database_and_repair_rc.score_ref-df_database_and_repair_rc.score_repaired
-
                             df_needle_alignment_rc=df_database_and_repair_rc
-
                             del df_database_and_repair_rc
 
                  else:
@@ -1399,12 +1463,10 @@ def main():
                  #fix for duplicates when rc alignment
                  df_needle_alignment_rc.index=map(lambda x:'_'.join([x,'RC']),df_needle_alignment_rc.index)
 
-
                  #append the RC reads to the aligned reads in the original orientation
                  df_needle_alignment=df_needle_alignment.append(df_needle_alignment_rc)
 
                  del df_needle_alignment_rc
-
 
              #check for duplicates
              try:
@@ -1429,22 +1491,18 @@ def main():
              N_TOTAL=df_needle_alignment.shape[0]*1.0
 
              if N_TOTAL==0:
-                 raise NoReadsAlignedException('Zero sequences aligned, please check your amplicon sequence')
+                 raise NoReadsAlignedException('ZERO sequences aligned, please check your amplicon sequence')
                  error('Zero sequences aligned')
 
              #remove the mutations in bp equal to 'N'
              if 'N' in args.amplicon_seq:
-
-                 info('Your amplicon sequence contains one or more N, excluding these bp for the indel quantification...')
-
-                 def ignore_N_in_alignment(row):
-                     row['align_str']=''.join([('|' if  (row['ref_seq'][idx]=='N') else c ) for idx,c in enumerate(row['align_str'])])
-                     if len(set(row['align_str']))==1:
-                         row['UNMODIFIED']=True
-
-                     return row
-
-                 df_needle_alignment=df_needle_alignment.apply(ignore_N_in_alignment,axis=1)
+               info('Your amplicon sequence contains one or more N, excluding these bp for the indel quantification...')
+               def ignore_N_in_alignment(row):
+                   row['align_str']=''.join([('|' if  (row['ref_seq'][idx]=='N') else c ) for idx,c in enumerate(row['align_str'])])
+                   if len(set(row['align_str']))==1:
+                       row['UNMODIFIED']=True
+                   return row
+               df_needle_alignment=df_needle_alignment.apply(ignore_N_in_alignment,axis=1)
 
 
 
@@ -1514,13 +1572,12 @@ def main():
                 exclude_idxs+=range(len_amplicon)[-args.exclude_bp_from_right:]
 
 
-
-
              #flatten the arrays to avoid errors with old numpy library
              include_idxs=np.ravel(include_idxs)
              exclude_idxs=np.ravel(exclude_idxs)
 
              include_idxs=set(np.setdiff1d(include_idxs,exclude_idxs))
+
 
 
              #handy generator to split in chunks the dataframe, np.split_array is slow!
@@ -1540,7 +1597,7 @@ def main():
                      effect_vector_mutation_chunk,effect_vector_any_chunk,effect_vector_insertion_mixed_chunk,effect_vector_deletion_mixed_chunk,\
                      effect_vector_mutation_mixed_chunk,effect_vector_insertion_hdr_chunk,effect_vector_deletion_hdr_chunk,effect_vector_mutation_hdr_chunk,\
                      effect_vector_insertion_noncoding_chunk,effect_vector_deletion_noncoding_chunk,effect_vector_mutation_noncoding_chunk,hist_inframe_chunk,\
-                     hist_frameshift_chunk,avg_vector_del_all_chunk,avg_vector_ins_all_chunk,MODIFIED_FRAMESHIFT_chunk,MODIFIED_NON_FRAMESHIFT_chunk,NON_MODIFIED_NON_FRAMESHIFT_chunk,\
+                     hist_frameshift_chunk,avg_vector_del_all_chunk,avg_vector_ins_all_chunk,MODIFIED_FRAMESHIFT_chunk,MODIFIED_NON_FRAMESHIFT_chunk,NON_INDELS_NON_FRAMESHIFT_chunk,\
                      SPLICING_SITES_MODIFIED_chunk=result
 
                      chunks_computed.append(df_needle_alignment_chunk)
@@ -1563,7 +1620,7 @@ def main():
                      avg_vector_ins_all+=avg_vector_ins_all_chunk
                      MODIFIED_FRAMESHIFT+=MODIFIED_FRAMESHIFT_chunk
                      MODIFIED_NON_FRAMESHIFT+=MODIFIED_NON_FRAMESHIFT_chunk
-                     NON_MODIFIED_NON_FRAMESHIFT+=NON_MODIFIED_NON_FRAMESHIFT_chunk
+                     NON_INDELS_NON_FRAMESHIFT+=NON_INDELS_NON_FRAMESHIFT_chunk
                      SPLICING_SITES_MODIFIED+=SPLICING_SITES_MODIFIED_chunk
 
                 pool.close()
@@ -1581,10 +1638,10 @@ def main():
                  effect_vector_deletion_noncoding,effect_vector_mutation_noncoding,\
                  hist_inframe,hist_frameshift,avg_vector_del_all,\
                  avg_vector_ins_all,MODIFIED_FRAMESHIFT,MODIFIED_NON_FRAMESHIFT,\
-                 NON_MODIFIED_NON_FRAMESHIFT,SPLICING_SITES_MODIFIED= process_df_chunk(df_needle_alignment)
+                 NON_INDELS_NON_FRAMESHIFT,SPLICING_SITES_MODIFIED= process_df_chunk(df_needle_alignment)
 
 
-             N_MODIFIED=df_needle_alignment['NHEJ'].sum()
+             N_INDELS=df_needle_alignment['NHEJ'].sum()
              N_UNMODIFIED=df_needle_alignment['UNMODIFIED'].sum()
              N_MIXED_HDR_NHEJ=df_needle_alignment['MIXED'].sum()
              N_REPAIRED=df_needle_alignment['HDR'].sum()
@@ -1704,10 +1761,10 @@ def main():
 
                  fig=plt.figure(figsize=(12*1.5,14.5*1.5))
                  ax1 = plt.subplot2grid((6,3), (0, 0), colspan=3, rowspan=5)
-                 patches, texts, autotexts =ax1.pie([N_UNMODIFIED,N_MIXED_HDR_NHEJ,N_MODIFIED,N_REPAIRED],\
+                 patches, texts, autotexts =ax1.pie([N_UNMODIFIED,N_MIXED_HDR_NHEJ,N_INDELS,N_REPAIRED],\
                                                                    labels=['Unmodified\n(%d reads)' %N_UNMODIFIED,\
                                                                            'Mixed HDR-NHEJ\n(%d reads)' %N_MIXED_HDR_NHEJ,
-                                                                           'NHEJ\n(%d reads)' % N_MODIFIED, \
+                                                                           'NHEJ\n(%d reads)' % N_INDELS, \
                                                                            'HDR\n(%d reads)' %N_REPAIRED,
                                                                            ],\
                                                                    explode=(0,0,0,0),\
@@ -1747,9 +1804,9 @@ def main():
              else:
                  fig=plt.figure(figsize=(12*1.5,14.5*1.5))
                  ax1 = plt.subplot2grid((6,3), (0, 0), colspan=3, rowspan=5)
-                 patches, texts, autotexts =ax1.pie([N_UNMODIFIED/N_TOTAL*100,N_MODIFIED/N_TOTAL*100],\
+                 patches, texts, autotexts =ax1.pie([N_UNMODIFIED/N_TOTAL*100,N_INDELS/N_TOTAL*100],\
                                                    labels=['Unmodified\n(%d reads)' %N_UNMODIFIED,\
-                                                           'NHEJ\n(%d reads)' % N_MODIFIED],\
+                                                           'NHEJ\n(%d reads)' % N_INDELS],\
                                                    explode=(0,0),colors=[(1,0,0,0.2),(0,0,1,0.2)],autopct='%1.1f%%')
 
                  if cut_points:
@@ -1928,7 +1985,7 @@ def main():
 
              lgd=plt.legend(loc='center', bbox_to_anchor=(0.5, -0.28),ncol=1, fancybox=True, shadow=True)
              y_label_values=np.arange(0,y_max,y_max/6.0)
-             plt.yticks(y_label_values,['%.1f%% (%.1f%% , %d)' % (n_reads/float(N_TOTAL)*100,n_reads/float(N_MODIFIED)*100, n_reads) for n_reads in y_label_values])
+             plt.yticks(y_label_values,['%.1f%% (%.1f%% , %d)' % (n_reads/float(N_TOTAL)*100,n_reads/float(N_INDELS)*100, n_reads) for n_reads in y_label_values])
              plt.xticks(np.arange(0,len_amplicon,max(3,(len_amplicon/6) - (len_amplicon/6)%5)).astype(int) )
 
              plt.xlabel('Reference amplicon position (bp)')
@@ -2084,10 +2141,10 @@ def main():
                  ax1 = plt.subplot2grid((6,3), (0, 0), colspan=3, rowspan=5)
                  patches, texts, autotexts =ax1.pie([MODIFIED_FRAMESHIFT,\
                                                     MODIFIED_NON_FRAMESHIFT,\
-                                                    NON_MODIFIED_NON_FRAMESHIFT],\
+                                                    NON_INDELS_NON_FRAMESHIFT],\
                                                     labels=['Frameshift mutation\n(%d reads)' %MODIFIED_FRAMESHIFT,\
                                                            'In-frame mutation\n(%d reads)' % MODIFIED_NON_FRAMESHIFT,\
-                                                           'Noncoding mutation\n(%d reads)' %NON_MODIFIED_NON_FRAMESHIFT],\
+                                                           'Noncoding mutation\n(%d reads)' %NON_INDELS_NON_FRAMESHIFT],\
                                                     explode=(0.0,0.0,0.0),\
                                                     colors=[(0.89019608,  0.29019608,  0.2, 0.8),(0.99215686,  0.73333333,  0.51764706,0.8),(0.99607843,  0.90980392,  0.78431373,0.8)],\
                                                     autopct='%1.1f%%')
@@ -2230,6 +2287,7 @@ def main():
 
                  #write alleles table to file
                  df_allele_around_cut.to_csv(_jp('Alleles_frequency_table_around_cut_site_for_%s.txt' % sgRNA),sep='\t',header=True)
+
                  plot_alleles_table(args.amplicon_seq,cut_point, df_allele_around_cut,sgRNA,OUTPUT_DIRECTORY,MIN_FREQUENCY=args.min_frequency_alleles_around_cut_to_plot,MAX_N_ROWS=args.max_rows_alleles_around_cut_to_plot)
 
              info('Done!')
@@ -2287,26 +2345,76 @@ def main():
              def save_vector_to_file(vector,name):
                      np.savetxt(_jp('%s.txt' %name), np.vstack([(np.arange(len(vector))+1),vector]).T, fmt=['%d','%.18e'],delimiter='\t', newline='\n', header='amplicon position\teffect',footer='', comments='# ')
 
+     	     fh_summary = open("outputsummary.txt","a")
+             if args.expected_hdr_amplicon_seq:
+		 last = len(ref_donor_diffs)
+	         percent_all_edit = 100 * (hdr_vector[last] / float(hdr_vector[last] + N_INDELS + N_UNMODIFIED))
+                 with open(_jp('summary_of_editing_frequency.txt'),'w+') as outfile:
+		
+		     #info('last: %d hdr_vector %s\n' % (last,hdr_vector))
+		     #print ', '.join(str(x) for x in hdr_vector)
+	
+		     if len(ref_donor_diffs) > 2:
+			 # header
+		         outfile.write('Sample\tTotalReads\tAlignedReads\tRefMatch\tNHEJ\t % NHEJ\t')
+		         for i in range(len(ref_donor_diffs)):
+				outfile.write('Pos %d\t%% edit\t' % (i+1))
+			 outfile.write('\n')
+			 #outfile.write('Any HDR Pos\t% edited\tAll HDR Pos\t% edited\tMixed HDR+NHEJ\tFrac of NHEJ with HDR\n')
+
+	         	 percent_indel = 100 * (N_INDELS / float(hdr_vector[0] + N_INDELS + N_UNMODIFIED))
+                         outfile.write('%s\t%d\t%d\t%d\t%d\t%.3f' % (args.name,N_READS_INPUT,N_TOTAL,N_UNMODIFIED,N_INDELS,percent_indel))
+                         fh_summary.write('%s\t%d\t%d\t%d\t%d\t%.3f' % (args.name,N_READS_INPUT,N_TOTAL,N_UNMODIFIED,N_INDELS,percent_indel))
+		         for i in range(len(ref_donor_diffs)):
+	                     percent_edit = 100 * (hdr_vector[i] / float(hdr_vector[i] + N_INDELS + N_UNMODIFIED))
+			     outfile.write( ('\t%d\t%.3f' % (hdr_vector[i],percent_edit)))
+			     fh_summary.write( ('\t%d\t%.3f' % (hdr_vector[i],percent_edit)))
+	         	 total_edited = 100 * (N_REPAIRED / float(N_REPAIRED + N_INDELS + N_UNMODIFIED))
+                         # any site edited
+			 outfile.write('\t%d\t%.3f\n' % (N_REPAIRED,total_edited))
+			 fh_summary.write('\t%d\t%.3f\n' % (N_REPAIRED,total_edited))
+		         #outfile.write('\t%d\t%.3f' % (hdr_vector[last],percent_all_edit))
+		         #fh_summary.write('\t%d\t%.3f' % (hdr_vector[last],percent_all_edit))
+	         	 #total_mixed = 100 * (N_MIXED_HDR_NHEJ / float(N_MIXED_HDR_NHEJ + N_INDELS ))
+			 #outfile.write('\t%d\t%.3f\n' % (N_MIXED_HDR_NHEJ,total_mixed))
+			 #fh_summary.write('\t%d\t%.3f\n' % (N_MIXED_HDR_NHEJ,total_mixed))
+	             else:
+		         outfile.write('Sample\tTotalReads\tAlignedReads\tRefMatch\tNHEJ\% NHEJ\tHDR\t% HDR\n')
+	         	 percent_hdr = 100 * (N_REPAIRED / float(N_REPAIRED + N_INDELS + N_UNMODIFIED))
+	         	 percent_indel = 100 * (N_INDELS / float(N_REPAIRED + N_INDELS + N_UNMODIFIED))
+                         outfile.write('%s\t%d\t%d\t%d\t%d\t%.3f\t%d\t%.3f\n' % (args.name,N_READS_INPUT,N_TOTAL,N_UNMODIFIED,N_INDELS,percent_indel,N_REPAIRED,percent_hdr))
+                         fh_summary.write('%s\t%d\t%d\t%d\t%d\t%.3f\t%d\t%.3f\n' % (args.name,N_READS_INPUT,N_TOTAL,N_UNMODIFIED,N_INDELS,percent_indel,N_REPAIRED,percent_hdr))
+		         
+             else:
+	         percent_indel = N_INDELS / float(N_INDELS + N_UNMODIFIED)
+                 with open(_jp('summary_of_editing_frequency.txt'),'w+') as outfile:
+		     outfile.write('Sample\tTotalReads\tAlignedReads\tRefMatch\tNHEJ\t% NHEJ\n')
+                     outfile.write('%s\t%d\t%d\t%d\t%d\t%.3f\n'  % (args.name,N_READS_INPUT,N_TOTAL,N_UNMODIFIED,N_INDELS,percent_indel))
+                     fh_summary.write('%s\t%d\t%d\t%d\t%d\t%.3f\n'  % (args.name,N_READS_INPUT,N_TOTAL,N_UNMODIFIED,N_INDELS,percent_indel))
+             fh_summary.close()
+             #write statistics
+	     if not args.skip_aln:
+                 with open(_jp('Mapping_statistics.txt'),'w+') as outfile:
+                     outfile.write('READS IN INPUTS:%d\nREADS AFTER PREPROCESSING:%d\nREADS ALIGNED:%d' % (N_READS_INPUT,N_READS_AFTER_PREPROCESSING,N_TOTAL))
 
              with open(_jp('Quantification_of_editing_frequency.txt'),'w+') as outfile:
                      outfile.write(
-                     ('Quantification of editing frequency:\n\t- Unmodified:%d reads\n'  %N_UNMODIFIED)\
-                     +('\t- NHEJ:%d reads (%d reads with insertions, %d reads with deletions, %d reads with substitutions)\n' % (N_MODIFIED, np.sum(df_needle_alignment.ix[df_needle_alignment.NHEJ,'n_inserted']>0),np.sum(df_needle_alignment.ix[df_needle_alignment.NHEJ,'n_deleted']>0),np.sum(df_needle_alignment.ix[df_needle_alignment.NHEJ,'n_mutated']>0)))\
+                     ('Quantification of editing frequency\tUnmodified\tNHEJ\tHDR\n\t%d reads\t%d reads\t%d reads\n'  % (N_UNMODIFIED,N_INDELS,N_REPAIRED))\
+                     +('\t- NHEJ:%d reads (%d reads with insertions, %d reads with deletions, %d reads with substitutions)\n' % (N_INDELS, np.sum(df_needle_alignment.ix[df_needle_alignment.NHEJ,'n_inserted']>0),np.sum(df_needle_alignment.ix[df_needle_alignment.NHEJ,'n_deleted']>0),np.sum(df_needle_alignment.ix[df_needle_alignment.NHEJ,'n_mutated']>0)))\
                      +('\t- HDR:%d reads (%d reads with insertions, %d reads with deletions, %d reads with substitutions)\n' % (N_REPAIRED, np.sum(df_needle_alignment.ix[df_needle_alignment.HDR,'n_inserted']>0),np.sum(df_needle_alignment.ix[df_needle_alignment.HDR,'n_deleted']>0),np.sum(df_needle_alignment.ix[df_needle_alignment.HDR,'n_mutated']>0)))\
-                     +('\t- Mixed HDR-NHEJ:%d reads (%d reads with insertions, %d reads with deletions, %d reads with substitutions)\n\n' % (N_MIXED_HDR_NHEJ, np.sum(df_needle_alignment.ix[df_needle_alignment.MIXED,'n_inserted']>0),np.sum(df_needle_alignment.ix[df_needle_alignment.MIXED,'n_deleted']>0),np.sum(df_needle_alignment.ix[df_needle_alignment.MIXED,'n_mutated']>0)))\
                      +('Total Aligned:%d reads ' % N_TOTAL))
+	
+
+#+('\t- Mixed HDR-NHEJ:%d reads (%d reads with insertions, %d reads with deletions, %d reads with substitutions)\n\n' % (N_MIXED_HDR_NHEJ, np.sum(df_needle_alignment.ix[df_needle_alignment.MIXED,'n_inserted']>0),np.sum(df_needle_alignment.ix[df_needle_alignment.MIXED,'n_deleted']>0),np.sum(df_needle_alignment.ix[df_needle_alignment.MIXED,'n_mutated']>0)))\
 
 
              #write alleles table
              df_alleles.ix[:,:'%Reads'].to_csv(_jp('Alleles_frequency_table.txt'),sep='\t',header=True,index=None)
 
-             #write statistics
-             with open(_jp('Mapping_statistics.txt'),'w+') as outfile:
-                 outfile.write('READS IN INPUTS:%d\nREADS AFTER PREPROCESSING:%d\nREADS ALIGNED:%d' % (N_READS_INPUT,N_READS_AFTER_PREPROCESSING,N_TOTAL))
 
              if PERFORM_FRAMESHIFT_ANALYSIS:
                  with open(_jp('Frameshift_analysis.txt'),'w+') as outfile:
-                         outfile.write('Frameshift analysis:\n\tNoncoding mutation:%d reads\n\tIn-frame mutation:%d reads\n\tFrameshift mutation:%d reads\n' %(NON_MODIFIED_NON_FRAMESHIFT, MODIFIED_NON_FRAMESHIFT ,MODIFIED_FRAMESHIFT))
+                         outfile.write('Frameshift analysis:\n\tNoncoding mutation:%d reads\n\tIn-frame mutation:%d reads\n\tFrameshift mutation:%d reads\n' %(NON_INDELS_NON_FRAMESHIFT, MODIFIED_NON_FRAMESHIFT ,MODIFIED_FRAMESHIFT))
 
                  with open(_jp('Splice_sites_analysis.txt'),'w+') as outfile:
                          outfile.write('Splice sites analysis:\n\tUnmodified:%d reads\n\tPotential splice sites modified:%d reads\n' %(df_needle_alignment.shape[0]- SPLICING_SITES_MODIFIED, SPLICING_SITES_MODIFIED))
@@ -2361,9 +2469,6 @@ def main():
                  np.savez(_jp('position_dependent_vector_avg_deletion_size'),avg_vector_del_all)
 
                  df_needle_alignment.to_pickle(_jp('processed_reads_dataframe.pickle'))
-
-
-
 
                  if args.expected_hdr_amplicon_seq:
                      np.savez(_jp('effect_vector_insertion_mixed_HDR_NHEJ'),effect_vector_insertion_mixed)
