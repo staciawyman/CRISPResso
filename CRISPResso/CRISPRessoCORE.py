@@ -274,6 +274,7 @@ def classify_read (row,substitution_positions,insertion_positions_flat,deletion_
     SUB=False
 
     ref_donor_diffs=[i for i in xrange(len(args.expected_hdr_amplicon_seq)) if args.expected_hdr_amplicon_seq[i] != args.amplicon_seq[i]]
+    #ref_donor_diffs=[i for i in xrange(len(args.expected_hdr_amplicon_seq)) if (args.amplicon_seq[i] != 'N' and args.expected_hdr_amplicon_seq[i] != args.amplicon_seq[i]])
     if include_idxs.intersection(insertion_positions_flat) or  include_idxs.intersection(deletion_positions_flat):
         NHEJ = True
 
@@ -1956,6 +1957,7 @@ def main():
 
 
              lgd=plt.legend(loc='center', bbox_to_anchor=(0.5, -0.23),ncol=1, fancybox=True, shadow=True)
+             info('HERE 1 3 done...')
              y_label_values=np.arange(0,y_max,y_max/6.0)
              plt.yticks(y_label_values,['%.1f%% (%d)' % (n_reads/float(N_TOTAL)*100, n_reads) for n_reads in y_label_values])
              plt.xticks(np.arange(0,len_amplicon,max(3,(len_amplicon/6) - (len_amplicon/6)%5)).astype(int) )
@@ -1964,6 +1966,7 @@ def main():
              plt.xlabel('Reference amplicon position (bp)')
              plt.ylabel('Sequences % (no.)')
              plt.ylim(0,max(1,y_max))
+             info('HERE 2 3 done...')
              plt.xlim(xmax=len(args.amplicon_seq)-1)
              plt.savefig(_jp('4a.Combined_Insertion_Deletion_Substitution_Locations.pdf'),bbox_extra_artists=(lgd,), bbox_inches='tight')
              if args.save_also_png:
@@ -1971,6 +1974,7 @@ def main():
              info('Plot 4a done...')
 
 
+             info('HERE 3 3 done...')
              #NHEJ
              plt.figure(figsize=(10,10))
              plt.plot(effect_vector_insertion,'r',lw=3,label='Insertions')
@@ -2305,7 +2309,10 @@ def main():
              for sgRNA,cut_point in zip(sgRNA_sequences,cut_points):
                  #print sgRNA,cut_point
 		 len_amplicon = len(args.amplicon_seq)
-		 offset_to_plot = (min(len_amplicon - cut_point,cut_point)) - 25
+		 # OFFSET WINDOW CHANGE HERE
+		 #offset_to_plot = (min(len_amplicon - cut_point,cut_point)) - 10
+		 #offset_to_plot = 110
+		 offset_to_plot = 20
 		 info('printing from %d %d %d' % (offset_to_plot,len_amplicon,cut_point))
                  df_allele_around_cut=get_dataframe_around_cut(df_alleles, cut_point, offset_to_plot)
                  #df_allele_around_cut=get_dataframe_around_cut(df_alleles, cut_point,args.offset_around_cut_to_plot)
@@ -2381,7 +2388,7 @@ def main():
 		     else: 
 			 fh_summary.write('MainSite\tMain%\t' )
 		 if args.all_edits:
-		     fh_summary.write('All HDR Pos\t% edited')
+		     fh_summary.write('All_HDR_Pos\tAll_Edit%')
 
 	         fh_summary.write('\n')
 
@@ -2397,7 +2404,7 @@ def main():
 			     else: 
 				outfile.write('MainSite\tMain%\t' )
 			 if args.all_edits:
-			     outfile.write('All HDR Pos\t% edited')
+			     outfile.write('All_HDR_Pos\tAll_Edit%')
 			 outfile.write('\n')
 
 	         	 percent_indel = 100 * (N_INDELS / float(hdr_vector[args.main_site] + N_SUBS + N_INDELS + N_UNMODIFIED))

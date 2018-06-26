@@ -154,7 +154,7 @@ def check_needle():
 		os.chdir('EMBOSS-6.5.7')
 		cmd_cfg='./configure --prefix=%s --without-x' % INSTALLATION_PATH
 		sb.call(cmd_cfg,shell=True)
-		sb.call('make && make install',shell=True)
+		sb.call('make "LDFLAGS=-Wl,-static" && make install',shell=True)
 		os.chdir('..')
 		sb.call('rm -Rf EMBOSS-6.5.7',shell=True)
 		sb.call('rm EMBOSS-6.5.7.tar.gz',shell=True)

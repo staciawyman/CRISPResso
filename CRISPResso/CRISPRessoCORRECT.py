@@ -1348,11 +1348,11 @@ def main():
 
              info('Aligning sequences with needle...')
 
-             if not args.skip_aln:
+             if not args.skip_aln: #SKW gapopen 50
                  cmd=(('cat %s |'% processed_output_filename )+\
                  (' gunzip |' if processed_output_filename.endswith('.gz') else ' '))+\
                  r''' awk 'NR % 4 == 1 {print ">" $0} NR % 4 ==2 {print $0}' '''+\
-                 " | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
+                 " | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -gapopen 50 -gapextend 0.1 -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
                  %(database_fasta_filename,args.needle_options_string,log_filename,needle_output_filename)
 
                  NEEDLE_OUTPUT=sb.call(cmd,shell=True)
@@ -1361,11 +1361,11 @@ def main():
 
              #If we have a donor sequence we just compare the fq in the two cases and see which one alignes better
              if args.expected_hdr_amplicon_seq:
-                 if not args.skip_aln:
+                 if not args.skip_aln: #SKW gapopen 20
                      cmd_repair=(('cat %s |'% processed_output_filename )+\
                      (' gunzip |' if processed_output_filename.endswith('.gz') else ' '))+\
                      r''' awk 'NR % 4 == 1 {print ">" $0} NR % 4 ==2 {print $0}' '''+\
-                     " | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
+                     " | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -gapopen 50 -gapextend 0.1 -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
                      %(database_repair_fasta_filename,args.needle_options_string,log_filename,needle_output_repair_filename)
 
                      NEEDLE_OUTPUT=sb.call(cmd_repair,shell=True)
@@ -1442,8 +1442,8 @@ def main():
                  info('Done!')
 
                  #Now we do the alignment
-                 if not args.skip_aln:
-                     cmd="zcat < %s | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
+                 if not args.skip_aln:	#SKW gaopen 20
+                     cmd="zcat < %s | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -gapopen 50 -gapextend 0.1 -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
                      %(fasta_not_aligned_filename,database_rc_fasta_filename,args.needle_options_string,log_filename,needle_output_rc_filename)
 
                      NEEDLE_OUTPUT=sb.call(cmd,shell=True)
@@ -1451,8 +1451,8 @@ def main():
                          raise NeedleException('Needle failed to run, please check the log file.')
 
                  if args.expected_hdr_amplicon_seq:
-                    if not args.skip_aln:
-                        cmd="zcat < %s | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
+                    if not args.skip_aln: #SKW gapopen 20
+                        cmd="zcat < %s | sed 's/:/_/g' | needle -asequence=%s -bsequence=/dev/stdin -gapopen 50 -gapextend 0.1 -outfile=/dev/stdout %s 2>> %s  | gzip >%s"\
                         %(fasta_not_aligned_filename,database_repair_rc_fasta_filename,args.needle_options_string,log_filename,needle_output_repair_rc_filename)
 
                         NEEDLE_OUTPUT=sb.call(cmd,shell=True)
@@ -2335,7 +2335,9 @@ def main():
              for sgRNA,cut_point in zip(sgRNA_sequences,cut_points):
                  #print sgRNA,cut_point
 		 len_amplicon = len(args.amplicon_seq)
-		 offset_to_plot = (min(len_amplicon - cut_point,cut_point)) - 25
+		 # SKW PRINT WINDOW
+		 offset_to_plot = 20
+		 #offset_to_plot = (min(len_amplicon - cut_point,cut_point)) - 25
 		 info('printing from %d %d %d' % (offset_to_plot,len_amplicon,cut_point))
                  df_allele_around_cut=get_dataframe_around_cut(df_alleles, cut_point, offset_to_plot)
                  #df_allele_around_cut=get_dataframe_around_cut(df_alleles, cut_point,args.offset_around_cut_to_plot)
