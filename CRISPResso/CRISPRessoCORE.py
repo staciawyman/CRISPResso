@@ -757,7 +757,7 @@ def plot_alleles_table(offset_to_plot,reference_seq,cut_point,df_alleles,sgRNA_n
     plt.savefig(_jp('9.Alleles_around_cut_site_for_%s.pdf' % args.name),bbox_inches='tight')
     if args.save_also_png:
         plt.savefig(_jp('9.Alleles_around_cut_site_for_%s.png' % args.name),bbox_inches='tight',pad=1)
-    info('Plot 9 Done!')
+    print 'Plot 9 Done!\n'
 # END FIG 9
 
 
@@ -775,10 +775,7 @@ def main():
                     \___/
              '''
              print'\n[Luca Pinello 2015, send bugs, suggestions or *green coffee* to lucapinello AT gmail DOT com]\n\n',
-
-
              print 'Version %s\n' % __version__
-
 
              #global variables for the multiprocessing
              global args
@@ -836,7 +833,6 @@ def main():
              parser.add_argument('--offset_around_cut_to_plot',  type=int, help='Offset to use to summarize alleles around the cut site in the alleles table plot.', default=20)
              parser.add_argument('--min_frequency_alleles_around_cut_to_plot', type=float, help='Minimum %% reads required to report an allele in the alleles table plot.', default=0.01)
              parser.add_argument('--max_rows_alleles_around_cut_to_plot',  type=int, help='Maximum number of rows to report in the alleles table plot. ', default=250)
-
              args = parser.parse_args()
 
              # vector of subs is zero based.
@@ -846,14 +842,12 @@ def main():
              if args.fastq_r2:
                      check_file(args.fastq_r2)
 
-
              #normalize name and remove not allowed characters
              if args.name:
                  clean_name=slugify(args.name)
                  if args.name!= clean_name:
                         warn('The specified name %s contained characters not allowed and was changed to: %s' % (args.name,clean_name))
                         args.name=clean_name
-
 
              #amplicon sequence check
              #make evetything uppercase!
@@ -905,7 +899,6 @@ def main():
              #args.offset_around_cut_to_plot = cut_points[0] - 1
 
 
-
              if args.expected_hdr_amplicon_seq:
                      args.expected_hdr_amplicon_seq=args.expected_hdr_amplicon_seq.strip().upper()
                      #ref_donor_diffs=[i for i in xrange(len(args.expected_hdr_amplicon_seq)) if args.expected_hdr_amplicon_seq[i] != args.amplicon_seq[i]]
@@ -943,35 +936,29 @@ def main():
 
              ###FRAMESHIFT SUPPORT###
              if args.coding_seq:
-
                     PERFORM_FRAMESHIFT_ANALYSIS=True
-
                     exon_positions=set()
                     exon_intervals=[]
                     splicing_positions=[]
 
                     for exon_seq in args.coding_seq.strip().upper().split(','):
-
                         #check for wrong NT
                         wrong_nt=find_wrong_nt(exon_seq)
                         if wrong_nt:
                             raise NTException('The coding sequence contains wrong characters:%s' % ' '.join(wrong_nt))
 
-                        st_exon=args.amplicon_seq.find(exon_seq )
+                        st_exon=args.amplicon_seq.find(exon_seq)
                         if  st_exon<0:
                             raise ExonSequenceException('The coding subsequence/s provided:%s is(are) not contained in the amplicon sequence.' % exon_seq)
-                        en_exon=st_exon+len(exon_seq ) #this do not include the upper bound as usual in python
+                        en_exon=st_exon+len(exon_seq) #this do not include the upper bound as usual in python
                         exon_intervals.append((st_exon,en_exon))
                         exon_positions=exon_positions.union(set(range(st_exon,en_exon)))
-
                         #consider 2 base pairs before and after each exon
                         splicing_positions+=[max(0,st_exon-2),max(0,st_exon-1),min(len_amplicon-1, en_exon),min(len_amplicon-1, en_exon+1)]
 
                     exon_positions=sorted(exon_positions)
-
                     #protect from the wrong splitting of exons by the users to avoid false splicing sites
                     splicing_positions=set(splicing_positions).difference(exon_positions)
-
              else:
                     PERFORM_FRAMESHIFT_ANALYSIS=False
 
@@ -979,18 +966,13 @@ def main():
              #we have insertions/deletions that change the concatenated exon sequence lenght and the difference between the final sequence
              #and the original sequence lenght is not a multiple of 3
              MODIFIED_FRAMESHIFT=0
-
              #we have insertions/deletions that change the concatenated exon sequence lenght and the difference between the final sequence
              #and the original sequence lenght is a multiple of 3. We are in this case also when no indels are present but we have
              #substitutions
              MODIFIED_NON_FRAMESHIFT=0
-
              #we don't touch the exons at all, the read can be still modified tough..
              NON_INDELS_NON_FRAMESHIFT=0
-
              SPLICING_SITES_MODIFIED=0
-
-
 
              ################
 
@@ -1001,10 +983,8 @@ def main():
                              database_id='%s_%s' % (get_name_from_fasta(args.fastq_r1),get_name_from_fasta(args.fastq_r2))
                      else:
                              database_id='%s' % get_name_from_fasta(args.fastq_r1)
-
              else:
                      database_id=args.name
-
 
              OUTPUT_DIRECTORY='%s' % database_id
 
@@ -1013,7 +993,6 @@ def main():
 
              _jp=lambda filename: os.path.join(OUTPUT_DIRECTORY,filename) #handy function to put a file in the output directory
              log_filename=_jp('CRISPResso_RUNNING_LOG.txt')
-
 
              try:
                      os.makedirs(OUTPUT_DIRECTORY)
@@ -1024,10 +1003,8 @@ def main():
 
              finally:
                      logging.getLogger().addHandler(logging.FileHandler(log_filename))
-
                      with open(log_filename,'w+') as outfile:
                          outfile.write('[Command used]:\nCRISPResso %s\n\n[Execution log]:\n' % ' '.join(sys.argv))
-
 
              filename=os.path.join(os.path.abspath(args.output_folder),args.name,'hdr_reads.txt')
              fh_hdr = open(filename,"w")
@@ -1045,40 +1022,35 @@ def main():
              fh_sub = open(filename,"w")
 
              if args.split_paired_end:
-
                 if args.fastq_r2!='':
-                        raise Exception('The option --split_paired_end is available only when a single fastq file is specified!')
+                    raise Exception('The option --split_paired_end is available only when a single fastq file is specified!')
                 else:
-                        info('Splitting paired end single fastq file in two files...')
-                        args.fastq_r1,args.fastq_r2=split_paired_end_reads_single_file(args.fastq_r1,
-                                                                                    output_filename_r1=_jp(os.path.basename(args.fastq_r1.replace('.fastq','')).replace('.gz','')+'_splitted_r1.fastq.gz'),
-                                                                                    output_filename_r2=_jp(os.path.basename(args.fastq_r1.replace('.fastq','')).replace('.gz','')+'_splitted_r2.fastq.gz'),)
-                        splitted_files_to_remove=[args.fastq_r1,args.fastq_r2]
-
-                        info('Done!')
+                    info('Splitting paired end single fastq file in two files...')
+                    args.fastq_r1,args.fastq_r2=split_paired_end_reads_single_file(args.fastq_r1,
+                        output_filename_r1=_jp(os.path.basename(args.fastq_r1.replace('.fastq','')).replace('.gz','')+'_splitted_r1.fastq.gz'),
+                        output_filename_r2=_jp(os.path.basename(args.fastq_r1.replace('.fastq','')).replace('.gz','')+'_splitted_r2.fastq.gz'),)
+                    splitted_files_to_remove=[args.fastq_r1,args.fastq_r2]
+                    info('Done!')
 
              if args.min_average_read_quality>0 or args.min_single_bp_quality>0:
                 info('Filtering reads with average bp quality < %d and single bp quality < %d ...' % (args.min_average_read_quality,args.min_single_bp_quality))
                 if args.fastq_r2!='':
                         args.fastq_r1,args.fastq_r2=filter_pe_fastq_by_qual(args.fastq_r1,
-                                                                         args.fastq_r2,
-                                                                         output_filename_r1=_jp(os.path.basename(args.fastq_r1.replace('.fastq','')).replace('.gz','')+'_filtered.fastq.gz'),
-                                                                         output_filename_r2=_jp(os.path.basename(args.fastq_r2.replace('.fastq','')).replace('.gz','')+'_filtered.fastq.gz'),
-                                                                         min_bp_quality=args.min_average_read_quality,
-                                                                         min_single_bp_quality=args.min_single_bp_quality,
+                             args.fastq_r2,
+                             output_filename_r1=_jp(os.path.basename(args.fastq_r1.replace('.fastq','')).replace('.gz','')+'_filtered.fastq.gz'),
+                             output_filename_r2=_jp(os.path.basename(args.fastq_r2.replace('.fastq','')).replace('.gz','')+'_filtered.fastq.gz'),
+                             min_bp_quality=args.min_average_read_quality,
+                             min_single_bp_quality=args.min_single_bp_quality,
                                                                          )
                 else:
                         args.fastq_r1=filter_se_fastq_by_qual(args.fastq_r1,
-                                                                   output_filename=_jp(os.path.basename(args.fastq_r1).replace('.fastq','').replace('.gz','')+'_filtered.fastq.gz'),
-                                                                   min_bp_quality=args.min_average_read_quality,
-                                                                   min_single_bp_quality=args.min_single_bp_quality,
+                             output_filename=_jp(os.path.basename(args.fastq_r1).replace('.fastq','').replace('.gz','')+'_filtered.fastq.gz'),
+                             min_bp_quality=args.min_average_read_quality,
+                             min_single_bp_quality=args.min_single_bp_quality,
                                                                    )
-
-
 
              if not args.skip_aln:
                  if args.fastq_r2=='': #single end reads
-    
                      #check if we need to trim
                      if not args.trim_sequences:
                          #create a symbolic link
@@ -1098,7 +1070,6 @@ def main():
     
                          if TRIMMOMATIC_STATUS:
                                  raise TrimmomaticException('TRIMMOMATIC failed to run, please check the log file.')
-    
     
                      processed_output_filename=output_forward_filename
     
@@ -1126,7 +1097,6 @@ def main():
                                  raise TrimmomaticException('TRIMMOMATIC failed to run, please check the log file.')
     
                          info('Done!')
-    
     
                      info('Estimating average read length...')
                      if get_n_reads_fastq(output_forward_paired_filename):
